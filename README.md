@@ -1,5 +1,5 @@
 # source-monitoring
 Source-monitoring analyses
 
-+ Computes: Internalizations, Externalizations, False_alarm, Hit_rate, ASCIM
++ Computes: internalizations, externalizations, false alarms, hit rates, ASCIM
 + Plot results
