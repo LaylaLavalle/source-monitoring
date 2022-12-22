@@ -1,0 +1,116 @@
+required.packages <- c("data.table",
+                       "knitr","xtable",
+                       "stringr","tidyr","plyr","dplyr",
+                       "ggplot2","ggthemes","scales","cowplot","RColorBrewer", 'reshape2')
+
+
+for(p in required.packages){
+  # if(!require(p,character.only = TRUE)) install.packages(p)
+  library(p,character.only = TRUE)
+}
+
+### Clean the dataset
+LaylaTask <- bind_rows(LaylaTask_a1, LaylaTask_b1, LaylaTask_a2, LaylaTask_b2) #combine dataframes
+LaylaTask <- subset(LaylaTask, corrAns2!="NA") 
+
+LaylaTask <- subset(LaylaTask, select=-c(colour, #supress irrelevant columns
+                                         corrAns,trials.thisRepN,
+                                         trials.thisTrialN,trials.thisN,trials.thisIndex,
+                                         conditions_reponse.thisRepN,conditions_reponse.thisN,conditions_reponse.thisTrialN,conditions_reponse.thisIndex,
+                                         reponses_keys.keys,Mots_Valence.thisRepN,Mots_Valence.thisTrialN,Mots_Valence.thisN,Mots_Valence.thisIndex,`DiplÃ´me le plus haut`))
+
+LaylaTask$Edu_lvl <- LaylaTask$`Nombre d'annÃ©es d'Ã©tude aprÃ¨s le CP` #make lisible variables
+LaylaTask$`Nombre d'annÃ©es d'Ã©tude aprÃ¨s le CP` <- NULL
+LaylaTask$Edu_lvl <- LaylaTask$`Nombre d'annÌ©es d'Ì©tude aprÌ¬s le CP`
+LaylaTask$`Nombre d'annÌ©es d'Ì©tude aprÌ¬s le CP` <- NULL
+LaylaTask$"DiplÌ«me le plus haut" <- NULL  
+LaylaTask$Subject <- LaylaTask$"Numero participant"
+LaylaTask$"Numero participant" <- NULL
+
+LaylaTask <- subset(LaylaTask, !(is.na(imaginer_bonne_reponse) & is.na(Valence.rt))) #suppress irrelant rows
+
+LaylaTask <- LaylaTask %>% #make the 6 groups
+  mutate(Group=ifelse(Subject %in% 6000:6999, 6,
+                       ifelse(Subject %in% 5000:5999, 5, 
+                       ifelse(Subject %in% 4000:4999, 4,
+                       ifelse(Subject %in% 3000:3999, 3,
+                       ifelse(Subject %in% 2000:2999, 2,
+                       ifelse(Subject %in% 1000:1999, 1, NA))))))) 
+LaylaTask$Group <- as.character(as.numeric(LaylaTask$Group))
+
+###dataframe transformation for SM scores calculation 
+LaylaTask <- LaylaTask %>% #add a hit rate column (=correct responses, whatever the source)
+  mutate(Hit_rate=imaginer_bonne_reponse + dire_bonne_reponse)
+
+SM_scores <- LaylaTask %>% #suprress irrelevant columns and rename to specify false alarms, internalizations, externalizations
+  subset(select=-c(valence_dire, Valence.rt),
+        (!(is.na(imaginer_bonne_reponse)))) %>% 
+  rename(false_alarm = fausse_reconnaissance,
+         internalizations = inversion_dire_imaginer,
+         externalizations = inversion_imaginer_dire)
+
+SM_scores$ASCIM <- rowMeans(SM_scores[,c('dire_bonne_reponse','imaginer_bonne_reponse')], na.rm=TRUE) #ASCIM is create
+SM_scores$Pr <- SM_scores$Hit_rate - SM_scores$false_alarm #Pr=(hit rates - false alarm) is created
+
+SM_scores_sum <- SM_scores %>% #sum items scores to participant scores
+  group_by(`Subject`,Group) %>%
+  summarise(Hit_rate = sum(Hit_rate, na.rm=TRUE),
+            Internalizations=sum(internalizations, na.rm=TRUE),
+            Externalizations=sum(externalizations, na.rm=TRUE),
+            False_alarm=sum(false_alarm, na.rm=TRUE),
+            ASCIM=sum(ASCIM, na.rm=TRUE),
+            Pr=sum(Pr,na.rm=TRUE))
+
+###Pr comparisons
+Pr <- subset(SM_scores_sum, select=-c(Internalizations, Externalizations, False_alarm, Hit_rate, ASCIM)) %>% #transform data
+  melt(id.vars=c("Subject", "Group"))
+
+ggplot(data=Pr, aes(x=Group, y=value, fill=Group)) + #plot Pr
+  facet_grid(.~variable, scales="free_x") +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+geom_errorbar(aes(ymin=lower, ymax=upper), width=.2, size=1,
+              position=position_dodge(.9))
+
+###ASCIM comparisons
+ASCIM <- subset(SM_scores_sum, select=-c(Internalizations, Externalizations, False_alarm, Hit_rate)) %>% #transform data
+  melt(id.vars=c("Subject", "Group"))
+
+ggplot(data=ASCIM, aes(x=Group, y=value, fill=Group)) + #plot ASCIM
+  facet_grid(.~variable, scales="free_x") +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+geom_errorbar(aes(ymin=lower, ymax=upper), width=.2, size=1,
+              position=position_dodge(.9))
+
+###separate false alarm and hit rate comparisons
+old_new <- subset(SM_scores_sum, select=-c(Internalizations, Externalizations)) %>% #transform data
+  melt(id.vars=c("Subject", "Group")) %>%
+  rename(score_type = variable, score_count = value)
+  
+ggplot(data=old_new, aes(x=Group, y=score_count, fill=Group)) + #plot false alarm & hit rate
+  facet_grid(.~score_type, scales="free_x") +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+geom_errorbar(aes(ymin=lower, ymax=upper), width=.2, size=1,
+          position=position_dodge(.9))
+
+aov.old_new <- aov(score_count~Group*score_type, data=old_new) #anova scores~Group*variable
+summary(aov.old_new)
+TukeyHSD(aov.old_new)
+            
+###internalizations/externalizations comparisons            
+int_ext <- subset(SM_scores_sum, select=-c(Hit_rate, False_alarm)) %>% #transform data
+  melt(id.vars=c("Subject", "Group")) %>%
+  rename(misattribution_type = variable, misattribution_count = value)
+
+ggplot(data=int_ext, aes(x=Group, y=misattribution_count, fill=Group)) + #plot internalizations & externalizations
+  facet_grid(.~misattribution_type, scales="free_x") +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+geom_errorbar(aes(ymin=lower, ymax=upper), width=.2, size=1,
+              position=position_dodge(.9))            
+
+aov.mis <- aov(misattribution_count~Group*misattribution_type, data=int_ext) #anova scores~Group*variable
+summary(aov.mis)
+TukeyHSD(aov.mis)            
